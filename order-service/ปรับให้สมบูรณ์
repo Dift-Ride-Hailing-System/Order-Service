@@ -1,0 +1,133 @@
+Interface แยกตามหน้าที่
+
+ใช้ แยกตาม Adapter/Producer/Consumer
+เช่น
+
+    PassengerCancelProducer → PassengerCancelProducerPort
+
+    DriverCancelConsumer → DriverCancelConsumerPort
+
+    TripHistoryProducer → TripHistoryProducerPort
+
+    OrderMatchingProducer → OrderMatchingProducerPort
+
+    MatchResultConsumer → MatchResultConsumerPort
+    ปล. ทำให้ Core Logic/Service ไม่ต้องรู้จัก Kafka/Redpanda หรือ gRPC โดยตรง
+
+    ****************************************************************************************************************
+
+ไฟล์ logic / service
+
+จะ import interface แทนที่จะ import Kafka/Redpanda/gRPC
+
+Core จะเรียกใช้ interface 
+
+****************************************************************************************************
+
+ไฟล์ Adapter / Producer / Consumer
+
+จะ import interface เพื่อ implement interface นั้น
+
+จะ import dto และ model เพื่อแปลงข้อมูลจาก/ไป domain
+
+Adapter จะ เรียกใช้ core.Producer() หรือ core.Consumer() ผ่าน interface ของ broker
+*********************************************************************************
+
+ไฟล์ DTO
+
+จะ import model เพราะต้องแปลงเป็น/จาก domain
+
+จะ import pb และ proto เพราะต้อง marshal/unmarshal protobuf
+
+ไม่ต้อง import Adapter, Core, Kafka, Redpanda, หรือ interface
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+สรุป
+Logic / Service → import interface + model
+
+Adapter / Producer / Consumer → import interface + dto + model + logger
+
+DTO → import model + pb + proto
+
+Interface → ไม่ import Kafka/Redpanda/gRPC แต่ Adapter จะ implement
+
+
+ลำดับจัดการแก้ไฟล์
+เริ่มจาก model
+ต่อด้วย interface (port)
+หลังจากนั้น implement interface (adapter / infra layer)
+ต่อไป business logic / service / usecase
+
+✅ ไฟล์เพื่อ implement interface
+
+model/*.go → domain types
+
+port/*.go → interface / abstraction
+
+adapter/kafka/*.go → implement interface สำหรับ Kafka
+
+service/core/*.go → business logic ใช้ interface และ model
+
+
+*****************
+สรุปการ import ของแต่ละไฟล์ 
+1️⃣ model
+
+👉 ไม่ import ใคร
+
+ใช้แค่ time, stdlib
+
+
+2️⃣ port (interface)
+
+✅ import model
+
+❌ ไม่ import adapter / dto / kafka / infra
+
+
+3️⃣ dto
+
+✅ import model
+
+❌ ไม่ import port / adapter / infra
+
+4️⃣ logic / flow / core
+
+✅ import model, port
+
+❌ ไม่ import adapter / dto / kafka / infra
+
+
+5️⃣ adapter
+
+✅ import port (ควรทำ)
+
+✅ import dto, model, flow/core
+
+❌ ไม่ import infra/kafka (สำหรับ consumer / producer logic)
+
+Adapter = แค่แปลงข้อมูล + เรียก business
+
+
+6️⃣ infra (kafka, grpc, db)
+
+❌ ไม่ import adapter / logic
+
+ใช้ lib ภายนอกล้วน
+
+
+7️⃣ worker / main
+
+✅ import infra, adapter, service
+
+
+
+👉 ที่เดียวที่ wire ทุกอย่าง
+
+🔑 กฎทอง (จำบรรทัดเดียว)
+
+Adapter import port
+Logic ใช้ port
+Kafka อยู่ infra / worker เท่านั้น

@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_backend_go/order-service/proto/pb;pb";
+
+enum PaymentMethod {
+  UNKNOWN = 0;
+  CREDIT_CARD = 1;
+  DEBIT_CARD = 2;
+  PROMPTPAY = 3;
+  WALLET = 4;
+  CASH = 5;
+}
+
+message CreatePaymentRequest {
+  string order_id = 1;
+  string user_id = 2;
+  double amount = 3;
+  PaymentMethod method = 4;
+}
+
+message CreatePaymentResponse {
+  string payment_id = 1;
+  string status = 2;
+  string qr_code_url = 3;
+  string redirect_url = 4;
+  int64 created_at = 5;
+}
+
+message CheckPaymentStatusRequest {
+  string payment_id = 1;
+}
+
+message CheckPaymentStatusResponse {
+  string payment_id = 1;
+  string status = 2;
+  int64 updated_at = 3;
+}
+
+service PaymentService {
+  rpc CreatePayment(CreatePaymentRequest) returns (CreatePaymentResponse);
+  rpc CheckPaymentStatus(CheckPaymentStatusRequest) returns (CheckPaymentStatusResponse);
+}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_backend_go/order-service/proto/pb;pb";
+
+message TravelLocation {
+  double lat = 1;
+  double lng = 2;
+  string address = 3;
+}
+
+message TravelRequest {
+  string route_id = 1;
+  string user_id = 2;
+  TravelLocation pickup = 3;
+  TravelLocation dropoff = 4;
+  string car_type = 5;
+  double distance = 6;
+  double duration = 7;
+  double price = 8;
+  string currency = 9;
+  int64 timestamp = 10;
+}

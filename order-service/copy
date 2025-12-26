@@ -1,0 +1,274 @@
+package grpc
+
+import (
+	"context"
+
+	port "dift_backend_go/order-service/internal/interface"
+	pb "dift_backend_go/order-service/proto/pb"
+)
+
+type CouponServiceAdapter struct {
+	client pb.CouponServiceClient
+}
+
+// compile-time check
+var _ port.CouponService = (*CouponServiceAdapter)(nil)
+
+func NewCouponServiceAdapter(
+	client pb.CouponServiceClient,
+) *CouponServiceAdapter {
+	return &CouponServiceAdapter{client: client}
+}
+
+func (a *CouponServiceAdapter) ApplyCoupon(
+	ctx context.Context,
+	userID, couponCode string,
+	orderTotal float64,
+) (float64, float64, error) {
+
+	resp, err := a.client.ApplyCoupon(ctx, &pb.ApplyCouponRequest{
+		UserId:     userID,
+		CouponCode: couponCode,
+		OrderTotal: orderTotal,
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return resp.FinalTotal, resp.Discount, nil
+}  
+********************************************
+package grpc
+
+import (
+	"context"
+	"time"
+
+	port "dift_backend_go/order-service/internal/interface"
+	pb "dift_backend_go/order-service/proto/pb"
+
+	"google.golang.org/grpc"
+)
+
+const defaultCallTimeout = 2 * time.Second
+
+// UserCouponAdapter เป็น gRPC adapter สำหรับ UserCouponService
+// implements port.UserCouponService
+type UserCouponAdapter struct {
+	client pb.UserCouponServiceClient
+	conn   *grpc.ClientConn
+}
+
+// compile-time check
+var _ port.UserCouponService = (*UserCouponAdapter)(nil)
+
+// NewUserCouponAdapter รับ grpc.Conn จาก infra
+func NewUserCouponAdapter(
+	conn *grpc.ClientConn,
+) *UserCouponAdapter {
+
+	return &UserCouponAdapter{
+		client: pb.NewUserCouponServiceClient(conn),
+		conn:   conn,
+	}
+}
+
+// Close ให้ main.go เป็นคนเรียกตอน shutdown
+func (a *UserCouponAdapter) Close() error {
+	if a.conn == nil {
+		return nil
+	}
+	return a.conn.Close()
+}
+
+// ListCoupons implements port.UserCouponService
+func (a *UserCouponAdapter) ListCoupons(
+	parentCtx context.Context,
+	userID string,
+) ([]string, error) {
+
+	ctx, cancel := context.WithTimeout(parentCtx, defaultCallTimeout)
+	defer cancel()
+
+	resp, err := a.client.ListUserCoupons(ctx, &pb.ListUserCouponsRequest{
+		UserId: userID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Coupons, nil
+} 
+
+********************************************
+package dto
+
+import (
+	"dift_backend_go/order-service/internal/model"
+	pb "dift_backend_go/order-service/proto/pb"
+)
+
+// ---------- Request ----------
+
+// Model → PB
+func ApplyCouponInputToPB(
+	input model.ApplyCouponInput,
+) *pb.ApplyCouponRequest {
+	return &pb.ApplyCouponRequest{
+		UserId:     input.UserID,
+		CouponCode: input.CouponCode,
+		OrderTotal: input.OrderTotal,
+	}
+}
+
+// ---------- Response ----------
+
+// PB → Model
+func ApplyCouponResultFromPB(
+	resp *pb.ApplyCouponResponse,
+) model.ApplyCouponResult {
+	return model.ApplyCouponResult{
+		FinalTotal: resp.FinalTotal,
+		Discount:   resp.Discount,
+		Valid:      resp.Valid,
+		Message:    resp.Message,
+	}
+} 
+
+********************************************
+package dto
+
+import (
+	"time"
+
+	"dift_backend_go/order-service/internal/model"
+	pb "dift_backend_go/order-service/proto/pb"
+)
+
+// Convert pb.UserCoupon → model.UserCoupon
+func UserCouponFromPB(pbCoupon *pb.UserCoupon) model.UserCoupon {
+	return model.UserCoupon{
+		Code:        pbCoupon.Code,
+		Title:       pbCoupon.Title,
+		Description: pbCoupon.Description,
+		Discount:    pbCoupon.Discount,
+		Currency:    pbCoupon.Currency,
+		ValidUntil:  time.Unix(pbCoupon.ValidUntil, 0),
+	}
+}
+
+// Convert model.UserCoupon → pb.UserCoupon
+func UserCouponToPB(c model.UserCoupon) *pb.UserCoupon {
+	return &pb.UserCoupon{
+		Code:        c.Code,
+		Title:       c.Title,
+		Description: c.Description,
+		Discount:    c.Discount,
+		Currency:    c.Currency,
+		ValidUntil:  c.ValidUntil.Unix(),
+	}
+}
+
+// Convert pb.ListUserCouponsResponse → model.ListUserCouponsResponse
+func ListUserCouponsResponseFromPB(
+	pbResp *pb.ListUserCouponsResponse,
+) model.ListUserCouponsResponse {
+
+	coupons := make([]model.UserCoupon, len(pbResp.Coupons))
+	for i, c := range pbResp.Coupons {
+		coupons[i] = UserCouponFromPB(c)
+	}
+
+	return model.ListUserCouponsResponse{Coupons: coupons}
+}
+
+// Convert model.ListUserCouponsResponse → pb.ListUserCouponsResponse
+func ListUserCouponsResponseToPB(
+	resp model.ListUserCouponsResponse,
+) *pb.ListUserCouponsResponse {
+
+	pbCoupons := make([]*pb.UserCoupon, len(resp.Coupons))
+	for i, c := range resp.Coupons {
+		pbCoupons[i] = UserCouponToPB(c)
+	}
+
+	return &pb.ListUserCouponsResponse{Coupons: pbCoupons}
+} 
+********************************************
+package grpcinfra
+
+import (
+	"context"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+// DialCouponService สร้าง gRPC connection (infra concern)
+func DialCouponService(
+	address string,
+	timeout time.Duration,
+) (*grpc.ClientConn, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return grpc.DialContext(
+		ctx,
+		address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+} 
+
+********************************************
+package grpcinfra
+
+import (
+	"context"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+// DialUserCouponService สร้าง gRPC connection (infra only)
+func DialUserCouponService(
+	address string,
+	timeout time.Duration,
+) (*grpc.ClientConn, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return grpc.DialContext(
+		ctx,
+		address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+} 
+********************************************
+package gprc_port
+
+import "context"
+
+type CouponService interface {
+	ApplyCoupon(
+		ctx context.Context,
+		userID string,
+		couponCode string,
+		orderTotal float64,
+	) (finalTotal, discount float64, err error)
+}และpackage gprc_port
+
+import "context"
+
+type UserCouponService interface {
+	ListCoupons(
+		ctx context.Context,
+		userID string,
+	) ([]string, error)
+}
+ 

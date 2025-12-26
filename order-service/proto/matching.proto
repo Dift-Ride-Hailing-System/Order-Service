@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_backend_go/order-service/proto/pb;pb";
+
+// Event สำหรับส่งไป Matching Service
+message OrderMatchingRequest {
+  string order_id = 1;
+  string user_id = 2;
+  string car_type = 3;
+  string pickup_location = 4;
+  string dropoff_location = 5;
+  double final_total = 6;
+  string coupon_code = 7;
+  double distance = 8;
+  double duration = 9;
+  string pickup_polyline = 10;
+  string dropoff_polyline = 11;
+  int64 timestamp = 12;
+}

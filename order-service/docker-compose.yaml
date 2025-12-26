@@ -1,0 +1,77 @@
+version: "3.9"
+
+services:
+  # ---------------------------
+  # Redpanda (Kafka replacement)
+  # ---------------------------
+  redpanda:
+    image: vectorized/redpanda:v23.1.4
+    container_name: redpanda
+    command: >
+      redpanda start
+      --overprovisioned
+      --smp 1
+      --memory 1G
+      --reserve-memory 0M
+      --node-id 0
+      --kafka-addr PLAINTEXT://0.0.0.0:9092
+      --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+    networks:
+      - notif-net
+
+  # ---------------------------
+  # Eclipse Mosquitto (MQTT Broker)
+  # ---------------------------
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.15
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001" # Websocket optional
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - notif-net
+
+  # ---------------------------
+  # Redis
+  # ---------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - notif-net
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # ---------------------------
+  # Notification Service
+  # ---------------------------
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification-service
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+    depends_on:
+      - redpanda
+      - mqtt-broker
+      - redis
+    networks:
+      - notif-net
+    ports:
+      - "2222:2222"
+      - "5051:5051"
+
+# ---------------------------
+# Networks
+# ---------------------------
+networks:
+  notif-net:
+    driver: bridge

@@ -1,0 +1,11 @@
+dift_backend_go\order-service\internal\interface\trip_history
+
+dift_backend_go\order-service\internal\interface\travel_order
+
+dift_backend_go\order-service\internal\interface\redis
+
+dift_backend_go\order-service\internal\interface\order_match
+
+dift_backend_go\order-service\internal\interface\coupon
+
+dift_backend_go\order-service\internal\interface\cancel

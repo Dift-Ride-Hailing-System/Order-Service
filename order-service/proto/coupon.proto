@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package pb_coupon;
+
+option go_package = "dift_backend_go/order-service/proto/pb/coupon;pb_coupon";
+
+// -----------------------------------------------------------
+// CouponService
+// ใช้สำหรับ apply coupon และคำนวณราคาสุดท้าย
+// -----------------------------------------------------------
+service CouponService {
+  // ApplyCoupon - คำนวณราคาสุดท้ายของ order โดยใช้ coupon
+  rpc ApplyCoupon(ApplyCouponRequest) returns (ApplyCouponResponse);
+}
+
+
+// ---------------------------
+// ApplyCouponRequest
+// ---------------------------
+message ApplyCouponRequest {
+  string user_id = 1;        // รหัสผู้ใช้
+  string coupon_code = 2;    // รหัสคูปองที่ต้องการ apply
+  double order_total = 3;    // ราคารวมก่อนลด
+}
+
+// ---------------------------
+// ApplyCouponResponse
+// ---------------------------
+message ApplyCouponResponse {
+  double final_total = 1;    // ราคาสุดท้ายหลังคูปอง
+  double discount = 2;       // ยอดส่วนลด
+  bool valid = 3;            // คูปองใช้ได้หรือไม่
+  string message = 4;        // ข้อความอธิบายผลลัพธ์
+}

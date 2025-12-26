@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_backend_go/order-service/proto/pb;pb";
+
+// Order สำหรับเก็บใน cache / ส่งต่อระหว่าง service
+message Order {
+  string order_id = 1;
+  string user_id = 2;
+  TravelLocation pickup = 3;
+  TravelLocation dropoff = 4;
+  string status = 5;
+  double estimated = 6;
+
+  // ผลจับคู่
+  MatchResult match_result = 7;
+
+  // ราคาหลังใช้คูปอง
+  double final_total = 8;
+  double discount = 9;
+  string coupon_code = 10;
+
+  // ข้อมูลคนขับ
+  string driver_id = 11;
+  string driver_name = 12;
+  string driver_car = 13;
+}
+
+message TravelLocation {
+  double lat = 1;
+  double lng = 2;
+  string address = 3;
+}
+
+message MatchResult {
+  string status = 1;
+  string driver_id = 2;
+  string driver_name = 3;
+  string driver_car = 4;
+}

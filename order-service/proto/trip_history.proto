@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_backend_go/order-service/proto/pb;pb";
+
+message TripHistoryEvent {
+  string order_id = 1;
+  string user_id = 2;
+  string status = 3;
+
+  string driver_id = 4;
+  string driver_name = 5;
+  string driver_car_model = 6;
+  string driver_avatar_url = 7;
+  string car_plate = 8;
+  string car_type = 9;
+
+  string pickup_location = 10;
+  string dropoff_location = 11;
+  double distance = 12;
+  double duration = 13;
+  string pickup_polyline = 14;
+  string dropoff_polyline = 15;
+
+  double final_total = 16;
+  string coupon_code = 17;
+
+  int64 timestamp = 18;
+  map<string, string> metadata = 19;
+}

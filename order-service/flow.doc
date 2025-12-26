@@ -1,0 +1,133 @@
+Order Service (Go) – สรุป Flow การทำงาน (ปัจจุบัน)
+adapter  → dto  → model  → flow  → core
+
+1. รับ Order ใหม่จาก Travel Service
+Travel Service ส่ง event (ผ่าน Kafka topic: travel-orders) → Order Service
+Order Service มี worker (TravelEventWorker) รอ consume event นี้
+เมื่อได้รับ event:
+แปลงข้อมูลเป็น TravelRequest
+สร้าง order draft (status = waiting_coupon) เก็บใน Redis Cache
+(Async) ดึงคูปองของ user จาก User Coupon Service และ precompute ราคาหลังใช้คูปองทุกใบ เก็บ cache ไว้
+2. Precompute Coupon
+หลังรับ order ใหม่ จะดึงคูปอง user (ผ่าน gRPC หรือ REST) จาก User Coupon Service
+สำหรับแต่ละคูปอง จะคำนวณราคาหลังใช้คูปอง (ผ่าน gRPC ไป Coupon Service)
+ผลลัพธ์ราคาหลังลดแต่ละคูปองจะถูก cache ไว้ใน Redis (key: precomputed_prices:<user_id>)
+3. User กดยืนยัน Order (Confirm)
+ฝั่ง Passenger App เรียก API → Order Service
+ตรวจสอบ idempotency (กันกดซ้ำ)
+โหลด order จาก Redis
+ตรวจสอบ status transition (waiting_coupon → matching_sent)
+ถ้าเลือกคูปอง จะดึงราคาที่ precompute ไว้มาใช้ (ถ้าไม่มีจะ precompute sync ทันที)
+อัปเดตราคา, discount, coupon code ใน order
+เปลี่ยน status เป็น matching_sent
+ส่ง event (Kafka topic: matching-requests) ไป Matching Service เพื่อเริ่มจับคู่
+4. Matching Service จับคู่ → Notification Service
+Matching Service ประมวลผลจับคู่ แล้วส่งผลลัพธ์ไป Notification Service
+Notification Service ส่ง event (Kafka topic: order-events) กลับมาที่ Order Service
+5. Order Service รับผลจับคู่ (MatchResult)
+มี worker (MatchResultWorker) consume event จาก Kafka topic: order-events
+เมื่อได้รับ event:
+แปลงข้อมูลเป็น MatchResult
+โหลด order จาก Redis
+ตรวจสอบ status transition
+ถ้า matched: อัปเดต status เป็น matched, ใส่ driver info
+ถ้าไม่ matched หรือ timeout: อัปเดต status เป็น not_matched หรือ timeout
+เก็บ MatchResult ใน order, อัปเดต Redis
+6. Driver หรือ Passenger ยกเลิก Order
+Passenger Cancel
+App เรียก API → Order Service
+ตรวจสอบ idempotency
+อัปเดต status เป็น cancelled
+ถ้ามี driver แล้ว ส่ง event (Kafka topic: order-cancel-driver) ไป Driver Service
+Driver Cancel
+Driver Service ส่ง event (Kafka topic: driver-cancel-order) → Order Service
+มี worker consume event นี้
+โหลด order, ตรวจสอบ status, อัปเดต status เป็น cancelled หรือ failed
+7. Background Cleanup
+มี background job คอยลบ order ที่หมดอายุออกจาก Redis และส่ง event cancel ไป Matching/Driver Service ถ้าจำเป็น
+สรุปการรับ-ส่งข้อมูล
+รับจาก:
+Kafka: travel-orders (Travel Service), order-events (Notification Service), driver-cancel-order (Driver Service)
+API: จาก Passenger App (confirm/cancel)
+ส่งไป:
+Kafka: matching-requests (Matching Service), order-cancel-driver (Driver Service), match-cancellations (Matching Service)
+gRPC: ไป User Coupon Service, Coupon Service (สำหรับ precompute coupon)
+เก็บข้อมูล: Redis Cache (order, precomputed coupon)
+Flow สรุป (เข้าใจง่าย)
+รับ order ใหม่ → เก็บ cache → precompute coupon
+User กดยืนยัน → ใช้ราคาคูปอง → ส่งจับคู่
+รอผลจับคู่ (Notification Service ส่งกลับ) → อัปเดตสถานะ order
+ยกเลิก (Passenger/Driver) → อัปเดตสถานะ → ส่ง event ไปอีกฝั่ง
+ลบ order ที่หมดอายุ (background)
+
+
+
+
+
+
+
+
+order-service/
+│
+├── config/
+│   ├── config.go                # โหลด config.yaml → struct
+│   └── config.yaml              # ค่า config ทั้งหมด (port, redis, kafka, grpc)
+│
+├── cmd/
+│   └── main.go                  # Entry point: init service, start HTTP + Kafka worker
+│
+├── internal/
+│   ├── model/
+│   │   └── order.go             # Order struct + update methods
+│   │
+│   ├── integration/
+│   │   ├── cache/
+│   │   │   ├── cache.go         # Cache interface
+│   │   │   └── redis_cache.go   # Redis implementation
+│   │   │
+│   │   ├── kafka/
+│   │   │   ├── kafka_consumer.go  # Kafka consumer
+│   │   │   └── kafka_publisher.go # Kafka producer
+│   │   │
+│   │   └── grpc_client/
+│   │       ├── coupon_service_client.go      # call Coupon Service
+│   │       └── user_coupon_client.go         # call User Coupon Service
+│   │
+│   ├── logger/
+│   │   └── logger.go             # Logger wrapper
+│   │
+│   ├── error/
+│   │   └── errors.go             # Error definitions
+│   │
+│   ├── service/
+│   │   ├── core/
+│   │   │   ├── order_service.go   # Service core + dependency injection
+│   │   │   ├── idempotency.go     # Idempotency lock (Redis)
+│   │   │   └── status.go          # Status transition validation
+│   │   │
+│   │   ├── flow_receive/
+│   │   │   └── receive.go         # รับ Draft Order จาก Travel (Kafka)
+│   │   │
+│   │   ├── flow_confirm/
+│   │   │   └── confirm_order.go   # ผู้โดยสารกดยืนยัน order
+│   │   │
+│   │   ├── flow_match/
+│   │   │   ├── match_result.go    # รับผลจับคู่จาก Matching/Notification
+│   │   │   └── consumer.go        # Worker pool กิน match-result
+│   │   │
+│   │   ├── flow_cancel/
+│   │   │   ├── passenger_cancel.go        # ผู้โดยสารกดยกเลิก
+│   │   │   └── driver_cancel_consumer.go  # Driver กดยกเลิก (Kafka)
+│   │   │
+│   │   └── background/
+│   │       ├── cleanup.go         # ลบ order หมดอายุ / cancel auto
+│   │       └── worker-pool.go     # Generic worker pool
+│   │
+│   └── api/
+│       └── http.go                # REST API สำหรับ mobile (confirm, cancel, get order)
+│
+└── proto/
+    └── order.proto                # Order protobuf
+
+
+protoc --proto_path=. --go_out=. --go_opt=paths=source_relative proto/usercoupon.proto

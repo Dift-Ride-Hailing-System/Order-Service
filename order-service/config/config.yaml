@@ -1,0 +1,106 @@
+# ==========================
+# Server
+# ==========================
+server:
+  host: "0.0.0.0"
+  port: "8080"
+  # mode: "release"
+
+# ==========================
+# Kafka
+# ==========================
+kafka:
+  bootstrap_servers:
+    - "kafka:9092"
+  group_id: "order-service-group"
+  timeout: "10s"
+
+  # -------- Consume Topics --------
+
+  # Travel Service -> Order Service
+  travel_request_topic: "travel-orders"
+
+  # Matching Service -> Order Service
+  match_result_topic: "order-match-result"
+
+  # Driver Service -> Order Service
+  driver_cancel_topic: "driver-cancel-order"
+
+  # -------- Produce Topics --------
+
+  # Order Service -> Matching Service
+  order_matching_topic: "matching-requests"
+
+  # Order Service -> Driver Service
+  passenger_cancel_topic: "order-cancel-driver"
+
+  # Order Service -> Trip History Service
+  trip_history_topic: "trip-history-events"
+
+# ==========================
+# Redis Cache
+# ==========================
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+  ttl: "300s"
+  prefix: "order:"
+
+# ==========================
+# Logging
+# ==========================
+logging:
+  level: "info"
+  format: "json"
+  file: ""
+
+# ==========================
+# Feature Toggles
+# ==========================
+features:
+  enableCoupon: true
+  enablePayment: true
+  enableNotification: true
+
+# ==========================
+# Documentation
+# ==========================
+docs:
+  url: "https://your-docs-url"
+  contact: "dev-team@example.com"
+
+# ==========================
+# External Services (gRPC)
+# ==========================
+grpc:
+  timeout: "5s"
+
+  user_coupon_service:
+    addr: "user-coupon-service:50051"
+
+  coupon_service:
+    addr: "coupon-service:50052"
+
+# ==========================
+# Payment Service (HTTP / REST)
+# ==========================
+payment_service:
+  base_url: "http://payment-service:9100/api"
+  timeout: "5s"
+  retry:
+    max_attempts: 3
+    interval: "200ms"
+
+# ==========================
+# Idempotency
+# ==========================
+idempotency:
+  ttl: "30s"
+
+# ==========================
+# Retry (Global Default)
+# ==========================
+retry:
+  max_attempts: 3
+  interval: "300ms"

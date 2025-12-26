@@ -1,0 +1,162 @@
+
+passenger_cancel.go // เป็นฟังก์ชัน trigger เมื่อผู้โดยสารกดยกเลิก order และส่งไป driver
+
+driver_cancel_consumer.go  //ทำหน้าที่เป็น consumer ของ driver cancel responses อัพเดทสถานะ order ตามที่ driver ส่งกลับ
+
+match_result.go  //ทำหน้าที่ รับ notification ว่า order ถูก matched กับ driver แล้ว และอัพเดท order ในระบบ
+        
+        
+----------------------
+Inbound ที่รับจากระบบอื่น → ต้องรู้ pb
+Business logic → ห้ามรู้ pb
+Outbound → แปลงผ่าน dto
+ สำคัญมาก------------------------------------------
+
+order-service/
+├── cmd/
+│   └── main.go
+│
+├── config/
+│   ├── config.go
+│   └── config.yaml
+│
+├── internal/
+│   ├── model/
+│   │   └── order.go
+│   │
+│   ├── logger/
+│   │   └── logger.go
+│   │
+│   ├── error/
+│   │   └── errors.go
+│   │
+│   ├── integration/
+│   │   ├── cache/
+│   │   │   ├── cache.go
+│   │   │   └── redis_cache.go
+│   │   │
+│   │   ├── grpc_client/
+│   │   │   ├── coupon_service_client.go
+│   │   │   └── user_coupon_client.go
+│   │   │
+│   │   ├── kafka/
+│   │   │   ├── kafka_consumer.go
+│   │   │   └── kafka_publisher.go
+│   │   │
+│   │   └── redpanda/
+│   │       ├── redpanda_consumer.go
+│   │       └── redpanda_publisher.go
+│   │
+│   ├── service/
+│   │   ├── core/
+│   │   │   ├── order_service.go
+│   │   │   ├── status.go
+│   │   │   └── idempotency.go
+│   │   │
+│   │   ├── flow_receive/
+│   │   │   └── receive.go
+│   │   │
+│   │   ├── flow_match/
+│   │   │   ├── consumer.go
+│   │   │   └── match_result.go
+│   │   │
+│   │   ├── flow_confirm/
+│   │   │   └── confirm_order.go
+│   │   │
+│   │   ├── flow_cancel/
+│   │   │   ├── passenger_cancel.go
+│   │   │   └── driver_cancel_consumer.go
+│   │   │
+│   │   ├── coupon/
+│   │   │   ├── coupon_precalculator.go
+│   │   │   ├── coupon_applier.go
+│   │   │   └── user_coupon_fetcher.go
+│   │   │
+│   │   ├── trip_history_worker/
+│   │   │   └── trip_history_worker.go
+│   │   │
+│   │   └── background/
+│   │       ├── worker-pool.go
+│   │       └── cleanup.go
+│   │
+│   └── (internal root)
+│
+└── go.mod / go.sum
+
+
+        
+         //สรุป Flow ตอนนี้//
+
+Confirm order → Order Service → Matching Service
+
+Matching Service → Notification Service (แจ้งผลจับคู่)
+
+Notification Service → Driver UI (Realtime)
+
+คนขับกดรับ → Notification Service → Order Service (อัพเดทสถานะ)
+
+Notification Service → Passenger UI (แจ้งผลจับคู่)
+
+1) Travel Service → Kafka (travel-events)
+        ↓
+2) TravelEventWorker → ReceiveTravelOrder()
+        ↓
+3) Order stored (status = waiting_coupon)
+        ↓ (async)
+   Precompute Coupon Prices
+        ↓
+4) User confirms → ConfirmOrder()
+        ↓
+5) Kafka → Matching (order-matching)
+        ↓
+6) Matching → Kafka (match-results)
+        ↓
+7) MatchResultWorker → HandleMatchResultSync()
+        ↓
+8) Order updated → matched / driver_assigned
+        ↓
+9) Driver หรือ Passenger ยกเลิก
+        ↓
+10) ส่ง Kafka driver-cancellations / driver-cancel-responses
+        ↓
+11) Order final status = completed / cancelled
+
+
+
+
+
+
+คือตอนนี้flowคือ เมื่อรับkafkaจาก travel 
+แล้ว ระบบorder service จะถึงคูปองผู้ใช้ทั้งหมดมาตรวจสอบ 
+และคำนวนไว้ก่อรใช่ไหม พอผู้โดยสารเลือกคูปองก็จะได้ราคาสุดท้าย 
+ที่มาจากcoupon serviceใช่ไหม พอกดจับคู่ ก็จะส่งkafkaไปmatching service 
+หลังจากนั้นก็รอผลตอนกลับ แต่ตอบกลับมาจากnotification service ด้วยkafkaใช่ไหม
+ ซึ่งถ้าจับคู่ไม่สำเร็จก็จะให้notificationส่งมาแจ้ง ส่วนจับคู่สำหรับจับคู่สำเร็ต เมื่อคนขับกดรับงาน 
+ ก็จะส่งมาแจ้งorder service ผ่านnotification service ใช่ไหมส่วนการยกเลิก order serviceนี้
+  ผู้โดยสารสามารถกดยกเลิกที่แอพ แล้วมันจะส่งไปยังdriver serviceด้วยkafkaใช่ไหม เพื่อยกเลิกออเดอร์ทั้งฝั่ง 
+  ส่วนการที่คนขับยกเลิก ก็จะส่งkafkaมาที่order service ให้เปลี่ยนสถานะเป็นยกเลิกใช่ไหม ตอนนี้ฃ
+
+
+
+
+  [Travel Service]
+      ↓ (pb / Kafka)
+flow_receive (IMPORT pb)
+      ↓
+model.Order (cache)
+
+User Confirm
+      ↓
+flow_confirm (NO pb)
+      ↓
+model.OrderMatching
+
+adapter.OrderMatchingProducer (IMPORT pb)
+      ↓ (Kafka / pb)
+[Matching Service]
+
+Matching Result
+      ↓ (Kafka / JSON)
+flow_match (NO pb)
+      ↓
+update Order

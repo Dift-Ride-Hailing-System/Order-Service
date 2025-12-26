@@ -1,0 +1,215 @@
+package main
+
+import (
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"dift_backend_go/order-service/config"
+
+	// =============================
+	// Infrastructure
+	// =============================
+	"dift_backend_go/order-service/internal/integration/cache"
+	"dift_backend_go/order-service/internal/integration/grpcclient"
+	"dift_backend_go/order-service/internal/integration/kafka"
+
+	// =============================
+	// Core & Flows
+	// =============================
+	"dift_backend_go/order-service/internal/service/core"
+	"dift_backend_go/order-service/internal/service/flow_cancel"
+
+	// =============================
+	// Domain Services
+	// =============================
+	"dift_backend_go/order-service/internal/service/coupon"
+
+	// =============================
+	// Adapters
+	// =============================
+	adapter "dift_backend_go/order-service/internal/adapter"
+
+	// =============================
+	// Workers
+	// =============================
+	"dift_backend_go/order-service/internal/service/worker"
+
+	// =============================
+	// HTTP
+	// =============================
+	route "dift_backend_go/order-service/route"
+)
+
+func main() {
+
+	// =============================
+	// Load Configuration
+	// =============================
+	cfg := config.LoadConfig("config/config.yaml")
+
+	// =============================
+	// Infrastructure: Redis
+	// =============================
+	redisCache := cache.NewRedisCache(
+		cfg.Redis.Addr,
+		cfg.Redis.Password,
+		cfg.Redis.DB,
+	)
+
+	// =============================
+	// Infrastructure: Kafka Producer
+	// =============================
+	kafkaProducer := kafka.NewKafkaWriter(cfg.Kafka.BootstrapServers)
+	defer kafkaProducer.Close()
+
+	// =============================
+	// Infrastructure: gRPC Clients
+	// =============================
+	userCouponGRPC, err := grpcclient.NewUserCouponClient(
+		cfg.GRPC.UserCouponAddr,
+		5*time.Second,
+	)
+	if err != nil {
+		log.Fatal("[Main] failed to connect UserCoupon gRPC:", err)
+	}
+	defer userCouponGRPC.Close()
+
+	couponGRPC, err := grpcclient.NewCouponServiceClient(
+		cfg.GRPC.CouponAddr,
+		5*time.Second,
+	)
+	if err != nil {
+		log.Fatal("[Main] failed to connect CouponService gRPC:", err)
+	}
+	defer couponGRPC.Close()
+
+	// =============================
+	// Domain Services: Coupon
+	// =============================
+	couponFetcher := coupon.NewUserCouponFetcher(
+		userCouponGRPC,
+		redisCache,
+		cfg.Redis.TTL,
+	)
+
+	couponPrecalc := coupon.NewCouponPrecalculator(
+		couponGRPC,
+		redisCache,
+		cfg.Redis.TTL,
+	)
+
+	couponApplier := coupon.NewCouponApplier(
+		redisCache,
+		cfg.Redis.TTL,
+	)
+
+	// =============================
+	// Core Order Service
+	// =============================
+	orderSvc := core.NewOrderService(
+		cfg,
+		couponFetcher,
+		couponPrecalc,
+		couponApplier,
+		kafkaProducer,
+		redisCache,
+	)
+
+	// =============================
+	// Flow Services
+	// =============================
+	cancelFlow := flow_cancel.NewOrderService(orderSvc)
+
+	// =============================
+	// Adapters (Kafka Consumers)
+	// =============================
+	travelAdapter := adapter.NewTravelOrderConsumer(orderSvc)
+	matchAdapter := adapter.NewOrderMatchConsumer(orderSvc)
+	driverCancelAdapter := adapter.NewDriverCancelConsumer(cancelFlow)
+
+	// =============================
+	// Kafka Consumers
+	// =============================
+	travelConsumer := kafka.NewKafkaReader(
+		cfg.Kafka.BootstrapServers,
+		cfg.Kafka.GroupID,
+		cfg.Kafka.TravelTopic,
+	)
+	defer travelConsumer.Close()
+
+	matchConsumer := kafka.NewKafkaReader(
+		cfg.Kafka.BootstrapServers,
+		cfg.Kafka.GroupID,
+		cfg.Kafka.ConsumerTopic,
+	)
+	defer matchConsumer.Close()
+
+	driverCancelConsumer := kafka.NewKafkaReader(
+		cfg.Kafka.BootstrapServers,
+		cfg.Kafka.GroupID,
+		cfg.Kafka.DriverCancelTopic,
+	)
+	defer driverCancelConsumer.Close()
+
+	// =============================
+	// Worker Pools
+	// =============================
+	travelCh := make(chan []byte, 100)
+	matchCh := make(chan []byte, 100)
+	driverCancelCh := make(chan []byte, 100)
+
+	worker.Start(travelCh, 2, travelAdapter.Handle)
+	worker.Start(matchCh, 2, matchAdapter.Handle)
+	worker.Start(driverCancelCh, 2, driverCancelAdapter.Handle)
+
+	// =============================
+	// Kafka → Worker Dispatch
+	// =============================
+	go travelConsumer.Consume(func(_ string, val []byte) error {
+		travelCh <- val
+		return nil
+	})
+
+	go matchConsumer.Consume(func(_ string, val []byte) error {
+		matchCh <- val
+		return nil
+	})
+
+	go driverCancelConsumer.Consume(func(_ string, val []byte) error {
+		driverCancelCh <- val
+		return nil
+	})
+
+	// =============================
+	// HTTP Server
+	// =============================
+	r := gin.Default()
+	route.RegisterRoutes(r, orderSvc)
+
+	go func() {
+		log.Printf("[Main] API listening on :%s\n", cfg.Server.Port)
+		if err := r.Run(":" + cfg.Server.Port); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// =============================
+	// Graceful Shutdown
+	// =============================
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	log.Println("[Main] shutting down order-service")
+
+	close(travelCh)
+	close(matchCh)
+	close(driverCancelCh)
+
+	time.Sleep(1 * time.Second)
+}

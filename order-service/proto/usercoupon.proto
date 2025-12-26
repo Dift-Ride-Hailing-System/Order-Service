@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package pb_usercoupon;
+
+option go_package = "dift_backend_go/order-service/proto/pb/usercoupon;pb_usercoupon";
+
+service UserCouponService {
+  rpc ListUserCoupons(ListUserCouponsRequest) returns (ListUserCouponsResponse);
+}
+
+message ListUserCouponsRequest {
+  string user_id = 1;
+}
+
+message ListUserCouponsResponse {
+  repeated UserCoupon coupons = 1;
+}
+
+message UserCoupon {
+  string code = 1;
+  string title = 2;
+  string description = 3;
+  double discount = 4;
+  string currency = 5;
+  int64 valid_until = 6;
+}

@@ -1,0 +1,79 @@
+package worker //ปรับ แก้ไขใหม่
+
+import (
+	"context"
+	"log"
+
+	core "dift_backend_go/order-service/internal/service/core"
+	pb "dift_backend_go/order-service/proto/pb"
+
+	"github.com/golang/protobuf/proto"
+)
+
+// -----------------------------
+// Travel Event Worker
+// -----------------------------
+type TravelEventWorker struct {
+	orderSvc *core.OrderService
+	jobs     chan []byte
+	workers  int
+}
+
+func NewTravelEventWorker(orderSvc *core.OrderService, jobs chan []byte, workers int) *TravelEventWorker {
+	return &TravelEventWorker{
+		orderSvc: orderSvc,
+		jobs:     jobs,
+		workers:  workers,
+	}
+}
+
+func (w *TravelEventWorker) Start() {
+	for i := 0; i < w.workers; i++ {
+		go w.workerLoop(i)
+	}
+}
+
+func (w *TravelEventWorker) workerLoop(id int) {
+	for payload := range w.jobs {
+		var req pb.TravelRequest
+		if err := proto.Unmarshal(payload, &req); err != nil {
+			log.Printf("[TravelWorker %d] unmarshal error: %v", id, err)
+			continue
+		}
+
+		if err := w.orderSvc.ReceiveTravelOrder(context.Background(), req.RouteId, payload); err != nil {
+			log.Printf("[TravelWorker %d] process error orderID=%s err=%v", id, req.RouteId, err)
+		}
+	}
+}
+
+// -----------------------------
+// Match Result Worker
+// -----------------------------
+type MatchResultWorker struct {
+	orderSvc *core.OrderService
+	jobs     chan []byte
+	workers  int
+}
+
+func NewMatchResultWorker(orderSvc *core.OrderService, jobs chan []byte, workers int) *MatchResultWorker {
+	return &MatchResultWorker{
+		orderSvc: orderSvc,
+		jobs:     jobs,
+		workers:  workers,
+	}
+}
+
+func (w *MatchResultWorker) Start() {
+	for i := 0; i < w.workers; i++ {
+		go w.workerLoop(i)
+	}
+}
+
+func (w *MatchResultWorker) workerLoop(id int) {
+	for payload := range w.jobs {
+		if err := w.orderSvc.HandleMatchResultSync(context.Background(), payload); err != nil {
+			log.Printf("[MatchWorker %d] handle error: %v", id, err)
+		}
+	}
+}
