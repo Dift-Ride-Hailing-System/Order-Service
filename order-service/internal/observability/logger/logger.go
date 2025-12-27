@@ -7,7 +7,7 @@ import (
 )
 
 func formatMessage(level, msg string, args ...interface{}) string {
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	timestamp := time.Now().Format
 	if len(args) > 0 {
 		msg = fmt.Sprintf(msg, args...)
 	}
@@ -33,3 +33,4 @@ func Error(msg string, args ...interface{}) {
 func Debug(msg string, args ...interface{}) {
 	log.Println(formatMessage("DEBUG", msg, args...))
 }
+
