@@ -42,7 +42,7 @@ func (f *CancelFlow) HandleDriverCancel(
 	}
 
 	var order model.Order
-	if err := json.Unmarshal(data, &order); err != nil {
+	if err := json.Unmarshal(data, &order); err != nil {//แก้ jsoเดียวค่อยแกี 
 		return err
 	}
 
